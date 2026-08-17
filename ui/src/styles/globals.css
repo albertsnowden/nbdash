@@ -1,0 +1,28 @@
+/* Latin-subset only (not the full 400.css, which also pulls in cyrillic/
+   greek/vietnamese weights) — this app's UI is English-only today, and
+   every static asset gets go:embed-ed into the shipped binary, so unused
+   glyph subsets are dead weight there, not just a slower page load. */
+@import "@fontsource/inter/latin-400.css";
+@import "@fontsource/inter/latin-500.css";
+@import "@fontsource/inter/latin-600.css";
+@import "@fontsource/inter/latin-700.css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* The app is dark-only today (no light-mode toggle built yet). `dark` is
+   applied as a literal class on <html> in index.html (Tailwind's
+   darkMode: "class" strategy, see tailwind.config.ts) rather than derived
+   from a system preference. */
+body {
+  @apply bg-nb-gray-950 text-nb-gray-50 antialiased;
+  font-family:
+    "Inter",
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    Roboto,
+    sans-serif;
+}

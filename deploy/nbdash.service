@@ -1,0 +1,92 @@
+[Unit]
+Description=nbdash — a dashboard for NetBird
+Documentation=https://github.com/albertsnowden/nbdash
+# network-online rather than network: OIDC discovery runs at startup and needs
+# a routable address. The binary retries discovery a few times anyway, so a
+# slow network delays startup instead of failing it.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+ExecStart=/usr/local/bin/nbdash
+EnvironmentFile=/etc/nbdash/nbdash.env
+
+Restart=on-failure
+RestartSec=5s
+
+# DynamicUser gives the service a transient, unprivileged UID with no home and
+# no shell — no useradd needed at install time. It is a good fit here because
+# the dashboard is stateless: templates and assets are compiled into the binary,
+# sessions live in memory, and nothing is written to disk.
+#
+# The consequence is that sessions do not survive a restart, so users re-login
+# after `systemctl restart`. That is a property of the in-memory session store,
+# not of DynamicUser.
+DynamicUser=yes
+
+# --- Memory cap --------------------------------------------------------------
+# On a small host that also runs netbird-server, this process must not be able
+# to push the management server into the OOM killer.
+#
+# These numbers come from a measured peak RSS of ~37.5 MiB under sustained
+# synthetic load across every module: MemoryHigh is ~4.8x that, MemoryMax
+# ~5.9x. That margin is deliberate — enough that normal operation and a
+# genuine traffic spike never touch the ceiling, while still capping the worst
+# case (a bug, a runaway client) at under a quarter of a 1 GiB host.
+#
+# MemoryHigh throttles (cgroup memory pressure slows allocation) before
+# MemoryMax kills, so a transient spike degrades rather than crash-loops.
+#
+# The methodology, the full measurement table and its caveats are in
+# docs/design.md ("Memory"). Re-measure with `systemctl status nbdash` and
+# `ps -o rss -p $(pgrep nbdash)` against your own account before trusting
+# these on a materially larger deployment: the figures were taken against a
+# small synthetic dataset, and a real account will sit somewhat higher.
+MemoryHigh=180M
+MemoryMax=220M
+
+# --- Hardening -------------------------------------------------------------
+# The process needs exactly one thing from the system: outbound TCP to the
+# identity provider and the Management API. Everything else is denied.
+
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+PrivateUsers=yes
+ProtectProc=invisible
+ProcSubset=pid
+
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+
+RestrictAddressFamilies=AF_INET AF_INET6
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources @obsolete
+
+UMask=0077
+
+# Binding LISTEN_ADDR to a port below 1024 requires an exception to the empty
+# capability set above. Prefer terminating TLS in a reverse proxy and leaving
+# this service on :8080; if you must bind :443 directly, uncomment both:
+# AmbientCapabilities=CAP_NET_BIND_SERVICE
+# CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+
+[Install]
+WantedBy=multi-user.target

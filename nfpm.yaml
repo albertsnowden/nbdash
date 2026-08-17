@@ -1,0 +1,87 @@
+# Packaging config for nfpm (https://nfpm.goreleaser.com), which builds the
+# .deb from the already-built binary — it does not compile anything itself.
+# Run ./deploy/build-deb.sh, which builds the binary first and then invokes
+# nfpm with this file; do not run `nfpm package` directly unless dist/ already
+# has a fresh binary for BIN_SRC below.
+#
+# Why nfpm instead of a hand-written debian/ + dpkg-buildpackage: one YAML
+# file plus three tiny shell scripts, no Debian packaging toolchain needed on
+# the build machine, and it is itself a single Go binary — the same
+# "minimal moving parts" philosophy this project already applies to the
+# dashboard binary itself.
+name: nbdash
+arch: "${ARCH}"
+platform: linux
+version: "${VERSION}"
+section: net
+priority: optional
+maintainer: "Albert Snowden <albertsnowden@hotmail.com>"
+homepage: "https://github.com/albertsnowden/nbdash"
+description: |
+  nbdash — an unofficial dashboard for NetBird. Server-rendered Go/htmx,
+  shipped as a single static binary with the OIDC session held server-side.
+  Not affiliated with or endorsed by NetBird GmbH.
+license: "BSD-3-Clause"
+
+# No runtime library dependencies — CGO_ENABLED=0, no libc link (confirm
+# with `ldd`, which reports "not a dynamic executable"). systemd is listed
+# because the unit this package installs assumes it; `dpkg -i` still installs
+# the package if it's absent (dpkg checks depends but does not block a direct
+# .deb install on them), it just leaves dpkg reporting the package as not
+# fully configured until systemd is present.
+depends:
+  - systemd
+
+contents:
+  - src: dist/nbdash-packaging-input
+    dst: /usr/local/bin/nbdash
+    file_info:
+      mode: 0755
+      owner: root
+      group: root
+
+  - src: deploy/nbdash.service
+    dst: /etc/systemd/system/nbdash.service
+    file_info:
+      mode: 0644
+      owner: root
+      group: root
+
+  - dst: /etc/nbdash
+    type: dir
+    file_info:
+      mode: 0700
+      owner: root
+      group: root
+
+  # config|noreplace: dpkg tracks this as a conffile. A fresh install writes
+  # the template; an upgrade leaves an already-edited file alone rather than
+  # clobbering AUTH_CLIENT_SECRET and whatever else the operator set — the
+  # same "never overwrite your environment file" guarantee install.sh makes,
+  # enforced by dpkg itself instead of a manual existence check.
+  - src: deploy/nbdash.env.example
+    dst: /etc/nbdash/nbdash.env
+    type: config|noreplace
+    file_info:
+      mode: 0600
+      owner: root
+      group: root
+
+scripts:
+  postinstall: deploy/deb/postinst.sh
+  preremove: deploy/deb/prerm.sh
+  postremove: deploy/deb/postrm.sh
+
+# RPM's install/remove lifecycle isn't dpkg's: %post/%preun/%postun get a
+# numeric $1 (install count remaining), not dpkg's configure/remove/upgrade
+# strings, and %config(noreplace) handles a modified config file
+# automatically (renamed to .rpmsave on erase) rather than needing a
+# separate purge step the way dpkg's conffile removal does. Same intent as
+# the deb scripts, rewritten for that model — see deploy/rpm/*.sh for the
+# actual per-difference reasoning.
+overrides:
+  rpm:
+    scripts:
+      postinstall: deploy/rpm/postinstall.sh
+      preremove: deploy/rpm/preremove.sh
+      postremove: deploy/rpm/postremove.sh

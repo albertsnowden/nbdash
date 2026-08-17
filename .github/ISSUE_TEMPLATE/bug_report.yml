@@ -1,0 +1,60 @@
+name: Bug report
+description: Something in nbdash does not work as documented
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Do not report security vulnerabilities here.** See
+        [SECURITY.md](https://github.com/albertsnowden/nbdash/blob/main/SECURITY.md)
+        for private reporting.
+
+        nbdash performs no authorization of its own — it forwards your own
+        token to the Management API. If the problem is "this user can/cannot
+        see something", check whether the Management API returns the same
+        result before filing here.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what you got instead.
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: nbdash version
+      description: Output of `nbdash --version`, or the commit you built from.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: client-mode
+    attributes:
+      label: OIDC client mode
+      description: Shown as `oidc_client_mode=` in the startup log line.
+      options:
+        - confidential (AUTH_CLIENT_SECRET set)
+        - public (AUTH_CLIENT_SECRET unset)
+        - not sure
+    validations:
+      required: true
+
+  - type: input
+    id: provider
+    attributes:
+      label: Identity provider
+      description: Auth0, Okta, Keycloak, NetBird's embedded Dex, ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: |
+        `journalctl -u nbdash -n 100`, or the output of `go run ./cmd/nbdash`.
+        Redact tokens, client secrets and setup keys before pasting.
+      render: shell

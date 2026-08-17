@@ -1,0 +1,30 @@
+# Build output. build.sh, build-deb.sh and build-rpm.sh all write here. Also
+# ignore a bare `go build ./cmd/nbdash` run from the repo root, which drops a
+# binary here named after the module rather than under dist/.
+dist/
+/nbdash
+
+# ui/'s own build output. ui/vite.config.ts builds straight into
+# internal/web/static/app/, which Go then embeds — see build.sh's comment on
+# why that output is built fresh (by build.sh, or CI) rather than committed.
+# Only the assets/ subdirectory is ignored, not index.html itself: a
+# committed placeholder lives at internal/web/static/app/index.html so a
+# plain `go build` still compiles even before anyone has run `npm run build`.
+internal/web/static/app/assets/
+
+# Local editor / agent configuration. The whole directory, not just the one
+# file that used to be listed — a stray local settings file in a public repo
+# leaks machine paths at best.
+.claude/
+.idea/
+.vscode/
+
+# Go
+*.test
+*.out
+coverage.txt
+
+# Environment files. deploy/nbdash.env.example is the tracked template; any
+# real .env carries AUTH_CLIENT_SECRET and must never be committed.
+*.env
+!deploy/nbdash.env.example

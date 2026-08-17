@@ -1,0 +1,100 @@
+name: Release
+
+# Tag push only, e.g.:
+#   git tag v0.1.0 && git push origin v0.1.0
+# The pattern below is GitHub's own glob dialect (not regex): [0-9]+ means
+# one-or-more digits, "." is literal. Pre-release suffixes like v0.1.0-rc1
+# deliberately don't match — this pipeline only ever cuts real releases.
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      # Built once, here, for the whole job: every deb/rpm build below sets
+      # SKIP_FRONTEND=1 and reuses this same internal/web/static/app/ output
+      # rather than rebuilding it four more times (amd64/arm64 x deb/rpm) —
+      # see build.sh's own comment on that env var. A release is the one
+      # place this genuinely must not be the placeholder committed at
+      # internal/web/static/app/index.html — every packaged binary embeds
+      # whatever's on disk at Go build time, so skipping this step would
+      # ship a release with a dead /app.
+      - name: Build frontend
+        run: (cd ui && npm ci && npm run build)
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install nfpm and rpm tooling
+        run: |
+          go install github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.47.0
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+          sudo apt-get update && sudo apt-get install -y rpm
+
+      # amd64 packaging goes through build.sh with tests enabled (its
+      # default), so a release is never cut from a tag whose code doesn't
+      # pass `go test -race`. arm64 and the two .rpm builds skip the
+      # already-passed tests instead of repeating them under cross-compiled
+      # arm64/CGO_ENABLED=0, where -race can't run anyway (see build.sh).
+      - name: Build amd64 binary + packages
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          SKIP_FRONTEND=1 GOARCH=amd64 ./deploy/build-deb.sh
+          SKIP_TESTS=1 SKIP_FRONTEND=1 GOARCH=amd64 ./deploy/build-rpm.sh
+
+      - name: Build arm64 binary + packages
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          SKIP_TESTS=1 SKIP_FRONTEND=1 GOARCH=arm64 ./deploy/build-deb.sh
+          SKIP_TESTS=1 SKIP_FRONTEND=1 GOARCH=arm64 ./deploy/build-rpm.sh
+
+      - name: Checksums
+        run: (cd dist && sha256sum * > checksums.txt)
+
+      # Reuse CHANGELOG.md (Keep a Changelog format) as the release body
+      # when the tagged version has its own heading; otherwise let GitHub
+      # generate notes from merged PRs so a release is never blocked on
+      # someone remembering to edit the changelog first.
+      - name: Extract CHANGELOG section
+        id: changelog
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          awk -v ver="$VERSION" '
+            $0 ~ "^## \\[" ver "\\]" { flag=1; next }
+            flag && /^## \[/ { exit }
+            flag { print }
+          ' CHANGELOG.md > /tmp/release-notes.md
+          if [ -s /tmp/release-notes.md ]; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "${{ steps.changelog.outputs.found }}" = "true" ]; then
+            gh release create "$GITHUB_REF_NAME" dist/* \
+              --title "$GITHUB_REF_NAME" --notes-file /tmp/release-notes.md
+          else
+            gh release create "$GITHUB_REF_NAME" dist/* \
+              --title "$GITHUB_REF_NAME" --generate-notes
+          fi

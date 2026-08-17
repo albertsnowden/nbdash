@@ -1,0 +1,103 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: frontend install
+        working-directory: ui
+        run: npm ci
+
+      - name: frontend build (tsc -b && vite build)
+        working-directory: ui
+        run: npm run build
+
+      - name: frontend test
+        working-directory: ui
+        run: npm test
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: gofmt
+        run: |
+          fmt_out="$(gofmt -l .)"
+          if [ -n "$fmt_out" ]; then
+            echo "The following files are not gofmt'd:"
+            echo "$fmt_out"
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go mod tidy (no diff expected)
+        run: |
+          cp go.mod /tmp/go.mod.orig
+          cp go.sum /tmp/go.sum.orig
+          go mod tidy
+          diff -u /tmp/go.mod.orig go.mod
+          diff -u /tmp/go.sum.orig go.sum
+
+      # Not just `go test`: the dashboard shares one *Session pointer across
+      # concurrent requests (the SPA fires several /api/bff/... calls in
+      # parallel on most pages), so unsynchronised access is a live risk
+      # here, not a theoretical one — see build.sh's own comment on this
+      # same step.
+      - name: go test -race
+        run: go test -race ./...
+
+      # Pinned rather than @latest: this runs on every push, so @latest means
+      # every push executes whatever code that module path resolves to at that
+      # moment. Pinning costs nothing in freshness — govulncheck fetches the
+      # vulnerability database from vuln.go.dev at run time, so a pinned binary
+      # still sees today's advisories. Dependabot bumps the pin.
+      - name: govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
+          govulncheck ./...
+
+      # SKIP_FRONTEND=1 on every invocation below: the frontend step near the
+      # top of this job already built internal/web/static/app/ once, and
+      # that output sits on disk for the rest of the job — rebuilding it
+      # four more times (once per amd64/arm64 x build.sh/build-deb.sh/
+      # build-rpm.sh below) would be pure waste, not a correctness issue.
+      - name: build (smoke test, both platforms this project ships)
+        run: |
+          SKIP_TESTS=1 SKIP_FRONTEND=1 ./build.sh
+          SKIP_TESTS=1 SKIP_FRONTEND=1 GOARCH=arm64 ./build.sh
+
+      - name: build .deb (smoke test, both platforms)
+        run: |
+          go install github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.47.0
+          export PATH="$PATH:$(go env GOPATH)/bin"
+          SKIP_TESTS=1 SKIP_FRONTEND=1 ./deploy/build-deb.sh
+          SKIP_TESTS=1 SKIP_FRONTEND=1 GOARCH=arm64 ./deploy/build-deb.sh
+          dpkg-deb --info dist/*_amd64.deb
+          dpkg-deb --contents dist/*_amd64.deb
+
+      - name: build .rpm (smoke test, both platforms)
+        run: |
+          sudo apt-get update && sudo apt-get install -y rpm
+          export PATH="$PATH:$(go env GOPATH)/bin"
+          SKIP_TESTS=1 SKIP_FRONTEND=1 ./deploy/build-rpm.sh
+          SKIP_TESTS=1 SKIP_FRONTEND=1 GOARCH=arm64 ./deploy/build-rpm.sh
+          rpm -qip dist/*.x86_64.rpm
+          rpm -qlp dist/*.x86_64.rpm

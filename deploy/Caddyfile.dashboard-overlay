@@ -1,0 +1,12 @@
+dashboard.example.com {
+  encode zstd gzip
+
+	@overlay remote_ip 100.64.0.0/10
+	handle @overlay {
+		reverse_proxy 127.0.0.1:8080
+	}
+
+  handle {
+                respond 404
+  }
+}

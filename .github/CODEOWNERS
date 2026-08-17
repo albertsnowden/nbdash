@@ -1,0 +1,6 @@
+# Code owners for nbdash.
+#
+# GitHub requests a review from the owner of any path a pull request touches.
+# One owner for everything, since this is a single-maintainer project.
+
+* @albertsnowden

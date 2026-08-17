@@ -1,0 +1,23 @@
+version: 2
+
+updates:
+  # Go modules. The dependency surface here is deliberately tiny (go-oidc,
+  # x/oauth2 and one indirect), so grouping everything into a single weekly PR
+  # keeps the noise proportional to it.
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      go-dependencies:
+        patterns: ["*"]
+
+  # Pinned action versions in .github/workflows. Without this they silently rot
+  # at whatever major tag they were written against.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      github-actions:
+        patterns: ["*"]
